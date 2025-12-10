@@ -1,0 +1,50 @@
+Map.addLayer(bangalore)
+Map.centerObject(bangalore, 10)
+
+var bnglreimage= ee.ImageCollection("LANDSAT/LC09/C02/T1_TOA")
+.filterDate('2023-01-01', '2024-12-30')
+.filterMetadata('CLOUD_COVER', 'less_than', 1)
+.filterBounds(bangalore)
+.select(['B8','B7','B6','B5','B4','B3','B2','B1'])
+.median()
+.clip(bangalore)
+
+Map.addLayer(bnglreimage, {bands:['B4', 'B3', 'B2'], min:0, max: 2.5, gamma: [1.1, 1.1, 1]}, 'Bangalore')
+
+
+//rgb to hsv
+var hsv = bnglreimage.select(['B4', 'B3', 'B2']).rgbToHsv();
+Map.addLayer(hsv, {}, 'bnglrehsv')
+
+//swap pan
+var sharpenedimage = ee.Image.cat([
+  hsv.select('hue'), hsv.select('saturation'), bnglreimage.select("B8")]).hsvToRgb();
+Map.addLayer(sharpenedimage, {}, "bangaloresharpened")
+
+
+// Export.image.toDrive({
+//   image: sharpenedimage,
+//   region: bangalore,
+//   description: 'SHARPENED',
+//   scale: 30,
+//   crs: 'EPSG:4326',
+//   maxPixels: 1e13
+// })
+
+// Export.image.toDrive({
+//   image: hsv,
+//   region: bangalore,
+//   description: 'HSV',
+//   scale: 30,
+//   crs: 'EPSG:4326',
+//   maxPixels: 1e13
+// })
+
+Export.image.toDrive({
+  image:  bnglreimage,
+  region: bangalore,
+  description: 'BANGALORE RGB',
+  scale: 30,
+  crs: 'EPSG:4326',
+  maxPixels: 1e13
+})
