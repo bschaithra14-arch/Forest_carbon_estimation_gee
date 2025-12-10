@@ -1,0 +1,116 @@
+
+// ----------------------------------
+var countryBoundaries = ee.FeatureCollection("FAO/GAUL_SIMPLIFIED_500m/2015/level1");
+// var studyArea = countryBoundaries
+//   .filter(ee.Filter.eq('ADM1_NAME', 'Karnataka'))   // change if you need exact Kodagu feature/filter
+//   .geometry();
+
+// Map.centerObject(studyArea, 8);
+// Map.addLayer(studyArea, {}, 'Study Area');
+
+
+var biomassData = ee.ImageCollection("WCMC/biomass_carbon_density/v1_0")
+  .first()
+  .rename('carbon');
+
+Map.addLayer(biomassData.clip(studyArea), {}, 'Biomass Carbon Density', false);
+
+
+
+var s2 = ee.ImageCollection("COPERNICUS/S2_SR_HARMONIZED")
+  .filterBounds(studyArea)
+  .filterDate('2020-01-01', '2020-12-31')
+  .filter(ee.Filter.lt('CLOUDY_PIXEL_PERCENTAGE', 10))
+  .select(['B2','B3','B4','B8'])    // blue, green, red, NIR
+  .median()
+  .multiply(0.0001);
+
+var ndvi = s2.normalizedDifference(['B8','B4']).rename('NDVI');
+
+// Tree cover mask 
+var treeMask = ee.ImageCollection("GOOGLE/DYNAMICWORLD/V1")
+  .filterBounds(studyArea)
+  .filterDate('2020-01-01', '2020-12-31')
+  .select('label')
+  .mode()
+  .eq(1);  // 1 => tree
+
+//predictor image: constant + S2 bands + NDVI
+var predictors = ee.Image.constant(1).rename('constant')
+  .addBands(s2)
+  .addBands(ndvi)
+  .updateMask(treeMask);
+
+Map.addLayer(predictors.clip(studyArea), {}, 'Predictors (masked)', false);
+
+
+var regressionImage = predictors.addBands(biomassData.rename('carbon'));
+
+
+print('Predictor band names', predictors.bandNames()); 
+
+var numX = predictors.bandNames().length();
+print('numX', numX);
+
+var regression = regressionImage.reduceRegion({
+  reducer: ee.Reducer.linearRegression({
+    numX: numX,
+    numY: 1
+  }),
+  geometry: studyArea,
+  scale: 100,
+  bestEffort: true,
+  tileScale: 4
+});
+
+print('Regression (raw)', regression);
+
+
+// EXTRACT COEFFICIENTS: 
+var coefArray1D = ee.Array(regression.get('coefficients')).project([0]);  // 1D
+var coefList = coefArray1D.toList(); // list of coefficients
+
+// Create a constant image with those coefficients and rename bands to match predictors
+var coefImage = ee.Image.constant(coefList).rename(predictors.bandNames());
+
+print('Coefficient list', coefList);
+print('Coefficient image', coefImage);
+
+
+// ESTIMATE CARBON: 
+
+var estimatedCarbon = predictors
+  .multiply(coefImage)         
+  .reduce(ee.Reducer.sum())     
+  .rename('Estimated_Carbon');
+
+Map.addLayer(estimatedCarbon.clip(studyArea),
+  {min:0, max:100, palette:['yellow','green','darkgreen']},
+  'Estimated Carbon');
+
+
+// ACCURACY: RMSE
+
+var sqError = biomassData.subtract(estimatedCarbon).pow(2);
+
+var meanSqError = sqError.reduceRegion({
+  reducer: ee.Reducer.mean(),
+  geometry: studyArea,
+  scale: 250,
+  bestEffort: true,
+  tileScale: 4
+});
+
+var rmse = ee.Number(meanSqError.values().get(0)).sqrt();
+print('RMSE', rmse);
+
+
+Export.image.toDrive({
+  image: estimatedCarbon.clip(studyArea).toFloat(),
+  description: 'Estimated_Carbon_Sentinel2_linearRegression',
+  folder: 'GEE_exports',              
+  region: studyArea,
+  scale: 100,
+  crs: 'EPSG:4326',
+  maxPixels: 1e13
+});
