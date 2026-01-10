@@ -1,9 +1,7 @@
-
-// ----------------------------------
 var countryBoundaries = ee.FeatureCollection("FAO/GAUL_SIMPLIFIED_500m/2015/level1");
-// var studyArea = countryBoundaries
-//   .filter(ee.Filter.eq('ADM1_NAME', 'Karnataka'))   // change if you need exact Kodagu feature/filter
-//   .geometry();
+var studyArea = countryBoundaries
+.filter(ee.Filter.eq('ADM1_NAME', 'Karnataka'))   // change if you need exact Kodagu feature/filter
+.geometry();
 
 // Map.centerObject(studyArea, 8);
 // Map.addLayer(studyArea, {}, 'Study Area');
